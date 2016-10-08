@@ -8,5 +8,5 @@ bin           = @["ptk"]
 
 # Dependencies
 
-requires @["nim >= 0.15.0", "docopt >= 0.6.4", "uuids", "langutils", "tempfile"]
+requires @["nim >= 0.15.0", "docopt >= 0.6.4", "uuids", "langutils", "tempfile", "timeutils"]
 
