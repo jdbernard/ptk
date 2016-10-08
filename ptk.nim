@@ -56,7 +56,7 @@ proc loadTimeline(filename: string): Timeline =
     raise newException(ValueError,
       "unable to parse the timeline file as JSON: " & filename)
 
-  var timeline: Timeline = (name: $timelineJson["name"], marks: @[])
+  var timeline: Timeline = (name: timelineJson["name"].getStr(), marks: @[])
 
   for markJson in timelineJson["marks"]:
     timeline.marks.add((
