@@ -146,13 +146,13 @@ proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, in
       result &= "\x0D\x0A" & spaces(prefixLen) & line
     result &= "\x0D\x0A"
 
-proc findById(marks: seq[Mark], id: string): auto =
+proc findById(marks: seq[Mark], id: string): int =
   var idx = 0
   for mark in marks:
-    if startsWith($mark.id, id): return (mark, idx)
+    if startsWith($mark.id, id): return idx
     inc(idx)
 
-  return (NO_MARK, -1)
+  return -1
 
 proc doInit(timelineLocation: string): void =
 
@@ -354,7 +354,8 @@ Options:
     if args["ammend"]:
 
       # Note, this returns a copy, not a reference to the mark in the seq.
-      var (mark, markIdx) = timeline.marks.findById($args["<id>"])
+      let markIdx = timeline.marks.findById($args["<id>"])
+      var mark = timeline.marks[markIdx]
       
       if args["<summary>"]: mark.summary = $args["<summary>"]
       if args["--notes"]: mark.notes = $args["<notes>"]
@@ -376,7 +377,7 @@ Options:
 
     if args["delete"]:
 
-      var (mark, markIdx) = timeline.marks.findById($args["<id>"])
+      let markIdx = timeline.marks.findById($args["<id>"])
       timeline.marks.delete(markIdx)
       saveTimeline(timeline, timelineLocation)
 
@@ -408,13 +409,13 @@ Options:
 
       if args["--ids"]:
         for id in args["<ids>"]:
-          let (mark, markIdx) = timeline.marks.findById(id)
-          if mark == NO_MARK:
+          let markIdx = timeline.marks.findById(id)
+          if markIdx == -1:
             warn "ptk: could not find mark for id " & id
           elif markIdx == timeline.marks.len - 1:
-            intervals.add(getLocalTime(getTime()) - mark.time)
+            intervals.add(getLocalTime(getTime()) - timeline.marks.last.time)
           else:
-            intervals.add(timeline.marks[markIdx + 1].time - mark.time)
+            intervals.add(timeline.marks[markIdx + 1].time - timeline.marks[markIdx].time)
 
       else:
 
@@ -422,10 +423,10 @@ Options:
         var endIdx = timeline.marks.len - 1
 
         if args["<firstId>"]:
-          startIdx = max(timeline.marks.findById($args["<firstId>"])[1], 0)
+          startIdx = max(timeline.marks.findById($args["<firstId>"]), 0)
 
         if args["<lastId>"]:
-          let idx = timeline.marks.findById($args["<firstId>"])[1]
+          let idx = timeline.marks.findById($args["<firstId>"])
           if (idx > 0): endIdx = idx
 
         if args["--after"]:
@@ -435,7 +436,7 @@ Options:
             "invalid value for --after: " & getCurrentExceptionMsg())
           let marks = timeline.marks.filter(proc(m: Mark): bool = m.time > startTime)
 
-          let (mark, idx) = timeline.marks.findById($marks.first.id)
+          let idx = timeline.marks.findById($marks.first.id)
           if idx > startIdx: startIdx = idx
 
         if args["--before"]:
@@ -445,7 +446,7 @@ Options:
             "invalid value for --after: " & getCurrentExceptionMsg())
           let marks = timeline.marks.filter(proc(m: Mark): bool = m.time < endTime)
 
-          let (mark, idx) = timeline.marks.findById($marks.last.id)
+          let idx = timeline.marks.findById($marks.last.id)
           if idx < endIdx: endIdx = idx
 
         for idx in startIdx..<min(endIdx, timeline.marks.len - 1):
