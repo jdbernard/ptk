@@ -123,7 +123,14 @@ proc writeMarks(marks: seq[Mark], includeNotes = false): void =
     setForegroundColor(stdout, fgCyan)
     write(stdout, " (" & duration & ")")
     resetAttributes(stdout)
-    writeLine(stdout, spaces(longestPrefix - prefixLens[i]) & " -- " & mark.summary)
+    write(stdout, spaces(longestPrefix - prefixLens[i]) & " -- " & mark.summary)
+
+    if mark.tags.len > 0:
+      setForegroundColor(stdout, fgGreen)
+      write(stdout, " (" & mark.tags.join(", ") & ")")
+      resetAttributes(stdout)
+
+    writeLine(stdout, "")
 
     if includeNotes and len(mark.notes.strip) > 0:
       writeLine(stdout, spaces(longestPrefix) & mark.notes)
@@ -172,6 +179,8 @@ proc doInit(timelineLocation: string): void =
     timelineFile.write($timeline.pretty)
   finally: close(timelineFile)
 
+type ExpectedMarkPart = enum Time, Summary, Tags, Notes
+
 proc edit(mark: var Mark): void =
   var
     tempFile: File
@@ -180,10 +189,11 @@ proc edit(mark: var Mark): void =
   try:
     (tempFile, tempFileName) = mkstemp("timestamp-mark-", ".txt", "", fmWrite)
     tempFile.writeLine(
-      """# Edit the time, mark, and notes below. Any lines starting with '#' will be
-# ignored. When done, save the file and close the editor.""")
+      """# Edit the time, mark, tags, and notes below. Any lines starting with '#' will
+# be ignored. When done, save the file and close the editor.""")
     tempFile.writeLine(mark.time.format(ISO_TIME_FORMAT))
     tempFile.writeLine(mark.summary)
+    tempFile.writeLine(mark.tags.join(","))
     tempFile.writeLine(
       """# Everything from the line below to the end of the file will be considered
 # notes for this timeline mark.""")
@@ -192,15 +202,16 @@ proc edit(mark: var Mark): void =
 
     discard os.execShellCmd "$EDITOR " & tempFileName & " </dev/tty >/dev/tty"
 
-    var
-      readTime = false
-      readSummary = false
+    var markPart = Time
 
     for line in lines tempFileName:
       if strip(line)[0] == '#': continue
-      elif not readTime: mark.time = parseTime(line); readTime = true
-      elif not readSummary: mark.summary = line; readSummary = true
-      else: mark.notes &= line
+      elif markPart == Time: mark.time = parseTime(line); markPart = Summary
+      elif markPart == Summary: mark.summary = line; markPart = Tags
+      elif markPart == Tags:
+        mark.tags = line.split({',', ';'});
+        markPart = Notes
+      else: mark.notes &= line & "\x0D\x0A"
 
   finally: close(tempFile)
 
@@ -211,11 +222,11 @@ Usage:
   ptk init [options]
   ptk add [options]
   ptk add [options] <summary>
-  ptk ammend [options] <id> [<summary>]
+  ptk amend [options] <id> [<summary>]
   ptk stop [options]
   ptk continue
   ptk delete <id>
-  ptk list [options]
+  ptk (list | ls) [options]
   ptk sum-time --ids <ids>...
   ptk sum-time [options] [<firstId>] [<lastId>]
   ptk (-V | --version)
@@ -230,11 +241,11 @@ Options:
   -c --config <cfgFile>   Use <cfgFile> as configuration for the CLI.
   -e --edit               Open the mark in an editor.
   -f --file <file>        Use the given timeline file.
-  -g --tags <tag>         Add the given tags (comma-separated) to the selected marks.
-  -G --remove-tag <tag>   Remove the given tag from the selected marks.
+  -g --tags <tags>        Add the given tags (comma-separated) to the selected marks.
+  -G --remove-tags <tagx> Remove the given tag from the selected marks.
   -h --help               Print this usage information.
-  -n --notes <notes>      For add and ammend, set the notes for a time mark.
-  -t --time <time>        For add and ammend, use this time instead of the current time.
+  -n --notes <notes>      For add and amend, set the notes for a time mark.
+  -t --time <time>        For add and amend, use this time instead of the current time.
   -v --verbose            Include notes in timeline entry output.
 """
 
@@ -243,7 +254,7 @@ Options:
   logging.addHandler(newConsoleLogger())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.2.0")
+  let args = docopt(doc, version = "ptk 0.2.1")
 
   if args["--echo-args"]: echo $args
 
@@ -358,7 +369,7 @@ Options:
 
       saveTimeline(timeline, timelineLocation)
 
-    if args["ammend"]:
+    if args["amend"]:
 
       # Note, this returns a copy, not a reference to the mark in the seq.
       let markIdx = timeline.marks.findById($args["<id>"])
@@ -380,10 +391,7 @@ Options:
 
       if args["--edit"]: edit(mark)
 
-      echo formatMark(
-        mark = mark,
-        timeFormat = "HH:mm",
-        includeNotes = args["--verbose"])
+      writeMarks(marks = @[mark], includeNotes = args["--verbose"])
 
       timeline.marks.delete(markIdx)
       timeline.marks.insert(mark, markIdx)
@@ -395,7 +403,7 @@ Options:
       timeline.marks.delete(markIdx)
       saveTimeline(timeline, timelineLocation)
 
-    if args["list"]:
+    if args["list"] or args["ls"]:
 
       var marks = timeline.marks
 
