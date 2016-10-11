@@ -8,7 +8,7 @@ import algorithm, docopt, json, langutils, logging, os, sequtils, strutils,
 import ptkutil
 
 type
-  Mark* = tuple[id: UUID, time: TimeInfo, summary: string, notes: string]
+  Mark* = tuple[id: UUID, time: TimeInfo, summary: string, notes: string, tags: seq[string]]
   Timeline* = tuple[name: string, marks: seq[Mark]]
 
 const STOP_MSG = "STOP"
@@ -16,12 +16,12 @@ const STOP_MSG = "STOP"
 let NO_MARK: Mark = (
   id: parseUUID("00000000-0000-0000-0000-000000000000"),
   time: getLocalTime(getTime()),
-  summary: "", notes: "")
+  summary: "", notes: "", tags: @[])
 
 const ISO_TIME_FORMAT = "yyyy:MM:dd'T'HH:mm:ss"
 
 const TIME_FORMATS = @[
-    "HH:mm", "HH:mm:ss", "HH:mm:ss",
+    "H:mm", "HH:mm", "H:mm:ss", "HH:mm:ss",
     "yyyy:MM:dd'T'HH:mm:ss", "yyyy:MM:dd'T'HH:mm"]
 
 #proc `$`*(mark: Mark): string =
@@ -43,7 +43,8 @@ template `%`(mark: Mark): JsonNode =
     "id": $(mark.id),
     "time": mark.time.format(ISO_TIME_FORMAT),
     "summary": mark.summary,
-    "notes": mark.notes
+    "notes": mark.notes,
+    "tags": mark.tags
   }
 
 template `%`(timeline: Timeline): JsonNode =
@@ -63,7 +64,8 @@ proc loadTimeline(filename: string): Timeline =
       id: parseUUID(markJson["id"].getStr()),
       time: parse(markJson["time"].getStr(), ISO_TIME_FORMAT),
       summary: markJson["summary"].getStr(),
-      notes: markJson["notes"].getStr()))
+      notes: markJson["notes"].getStr(),
+      tags: markJson["tags"].getElems(@[]).map(proc (t: JsonNode): string = t.getStr())))
 
   return timeline
 
@@ -221,17 +223,19 @@ Usage:
 
 Options:
 
-  -f --file <file>        Use the given timeline file.
-  -c --config <cfgFile>   Use <cfgFile> as configuration for the CLI.
-  -t --time <time>        For add and ammend, use this time instead of the current time.
-  -n --notes <notes>      For add and ammend, set the notes for a time mark.
+  -E --echo-args          Echo the program's understanding of it's arguments.
   -V --version            Print the tool's version information.
-  -e --edit               Open the mark in an editor.
   -a --after <after>      Restrict the selection to marks after <after>.
   -b --before <before>    Restrict the selection to marks after <before>.
+  -c --config <cfgFile>   Use <cfgFile> as configuration for the CLI.
+  -e --edit               Open the mark in an editor.
+  -f --file <file>        Use the given timeline file.
+  -g --tags <tag>         Add the given tags (comma-separated) to the selected marks.
+  -G --remove-tag <tag>   Remove the given tag from the selected marks.
   -h --help               Print this usage information.
+  -n --notes <notes>      For add and ammend, set the notes for a time mark.
+  -t --time <time>        For add and ammend, use this time instead of the current time.
   -v --verbose            Include notes in timeline entry output.
-  -E --echo-args          Echo the program's understanding of it's arguments.
 """
 
 # TODO: add    ptk delete [options]
@@ -239,7 +243,7 @@ Options:
   logging.addHandler(newConsoleLogger())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.1.0")
+  let args = docopt(doc, version = "ptk 0.2.0")
 
   if args["--echo-args"]: echo $args
 
@@ -295,13 +299,14 @@ Options:
 
     if args["stop"]:
 
-      let newMark = (
+      let newMark: Mark = (
         id: genUUID(),
         time:
           if args["--time"]: parseTime($args["--time"])
           else: getLocalTime(getTime()),
         summary: STOP_MSG,
-        notes: args["--notes"] ?: "")
+        notes: args["--notes"] ?: "",
+        tags: (args["--tags"] ?: "").split({',', ';'}))
         
       timeline.marks.add(newMark)
       writeMarks(
@@ -327,7 +332,8 @@ Options:
           if args["--time"]: parseTime($args["--time"])
           else: getLocalTime(getTime()),
         summary: prevMark.summary,
-        notes: prevMark.notes)
+        notes: prevMark.notes,
+        tags: prevMark.tags)
 
       timeline.marks.add(newMark)
       writeMarks(marks = @[newMark], includeNotes = args["--verbose"])
@@ -342,7 +348,8 @@ Options:
           if args["--time"]: parseTime($args["--time"])
           else: getLocalTime(getTime()),
         summary: args["<summary>"] ?: "",
-        notes: args["--notes"] ?: "")
+        notes: args["--notes"] ?: "",
+        tags: (args["--tags"] ?: "").split({',', ';'}))
 
       if args["--edit"]: edit(newMark)
 
@@ -359,6 +366,13 @@ Options:
       
       if args["<summary>"]: mark.summary = $args["<summary>"]
       if args["--notes"]: mark.notes = $args["<notes>"]
+      if args["--tags"]:
+        mark.tags &= (args["--tags"] ?: "").split({',', ';'})
+        mark.tags = mark.tags.deduplicate
+      if args["--remove-tags"]:
+        let tagsToRemove = (args["--remove-tags"] ?: "").split({',', ';'})
+        mark.tags = mark.tags.filter(proc (t: string): bool =
+          anyIt(tagsToRemove, it == t))
       if args["--time"]:
         try: mark.time = parseTime($args["--time"])
         except: raise newException(ValueError,
