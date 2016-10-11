@@ -3,8 +3,9 @@
 ##
 ## Simple time keeping CLI
 
-import algorithm, docopt, json, langutils, logging, os, sequtils, strutils,
-  tempfile, terminal, times, timeutils, uuids
+import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
+  strutils, tempfile, terminal, times, timeutils, uuids
+
 import ptkutil
 
 type
@@ -15,7 +16,7 @@ const STOP_MSG = "STOP"
 
 let NO_MARK: Mark = (
   id: parseUUID("00000000-0000-0000-0000-000000000000"),
-  time: getLocalTime(getTime()),
+  time: fromSeconds(0).getLocalTime,
   summary: "", notes: "", tags: @[])
 
 const ISO_TIME_FORMAT = "yyyy:MM:dd'T'HH:mm:ss"
@@ -67,6 +68,9 @@ proc loadTimeline(filename: string): Timeline =
       notes: markJson["notes"].getStr(),
       tags: markJson["tags"].getElems(@[]).map(proc (t: JsonNode): string = t.getStr())))
 
+  timeline.marks = timeline.marks.sorted(
+    proc(a, b: Mark): int = cmp(a.time, b.time))
+
   return timeline
 
 proc saveTimeline(timeline: Timeline, location: string): void =
@@ -86,54 +90,63 @@ proc flexFormat(i: TimeInterval): string =
 
   return i.format(fmt)
 
-proc writeMarks(marks: seq[Mark], includeNotes = false): void =
+type WriteData = tuple[idx: int, mark: Mark, prefixLen: int, interval: TimeInterval]
+
+proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): void =
+  let marks = timeline.marks
   let now = getLocalTime(getTime())
 
+  var idxs = indices.sorted(
+    proc(a, b: int): int = cmp(marks[a].time, marks[b].time))
+
   let timeFormat =
-    if now - marks.first.time > 1.years: "yyyy-MM-dd HH:mm"
-    elif now - marks.first.time > 7.days: "MMM dd HH:mm"
-    elif now - marks.first.time > 1.days: "ddd HH:mm"
+    if now - marks[idxs.first].time > 1.years: "yyyy-MM-dd HH:mm"
+    elif now - marks[idxs.first].time > 7.days: "MMM dd HH:mm"
+    elif now - marks[idxs.first].time > 1.days: "ddd HH:mm"
     else: "HH:mm"
 
-  var intervals: seq[TimeInterval] = @[]
-  for i in 0..<marks.len - 1: intervals.add(marks[i+1].time - marks[i].time)
-  intervals.add(now - marks.last.time)
+  var toWrite: seq[WriteData] = @[]
 
-  var prefixLens: seq[int] = @[]
   var longestPrefix = 0
-  for i in 0..<marks.len:
-    let
-      mark = marks[i]
-      interval = intervals[i]
-      prefix = ($mark.id)[0..<8] & "  " & mark.time.format(timeFormat) & " (" & interval.flexFormat & ")"
 
-    prefixLens.add(prefix.len)
+  for i in idxs:
+    let
+      interval: TimeInterval =
+        if (i == marks.len - 1): now - marks[i].time
+        else: marks[i + 1].time - marks[i].time
+      prefix =
+        ($marks[i].id)[0..<8] & "  " & marks[i].time.format(timeFormat) &
+        " (" & interval.flexFormat & ")"
+
+    toWrite.add((
+      idx: i,
+      mark: marks[i],
+      prefixLen: prefix.len,
+      interval: interval))
+
     if prefix.len > longestPrefix: longestPrefix = prefix.len
 
-  for i in 0..<marks.len:
-    let mark = marks[i]
+  for w in toWrite:
+    if w.mark.summary == STOP_MSG: continue
 
-    if mark.summary == STOP_MSG: continue
-
-    let duration = intervals[i].flexFormat
     setForegroundColor(stdout, fgBlack, true)
-    write(stdout, ($mark.id)[0..<8])
+    write(stdout, ($w.mark.id)[0..<8])
     setForegroundColor(stdout, fgYellow)
-    write(stdout, "  " & mark.time.format(timeFormat))
+    write(stdout, "  " & w.mark.time.format(timeFormat))
     setForegroundColor(stdout, fgCyan)
-    write(stdout, " (" & duration & ")")
+    write(stdout, " (" & w.interval.flexFormat & ")")
     resetAttributes(stdout)
-    write(stdout, spaces(longestPrefix - prefixLens[i]) & " -- " & mark.summary)
+    write(stdout, spaces(longestPrefix - w.prefixLen) & " -- " & w.mark.summary)
 
-    if mark.tags.len > 0:
+    if w.mark.tags.len > 0:
       setForegroundColor(stdout, fgGreen)
-      write(stdout, " (" & mark.tags.join(", ") & ")")
+      write(stdout, " (" & w.mark.tags.join(", ") & ")")
       resetAttributes(stdout)
 
     writeLine(stdout, "")
 
-    if includeNotes and len(mark.notes.strip) > 0:
-      writeLine(stdout, spaces(longestPrefix) & mark.notes)
+    if includeNotes and len(w.mark.notes.strip) > 0:
+      writeLine(stdout, spaces(longestPrefix) & w.mark.notes)
       writeLine(stdout, "")
 
 proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, includeNotes = false): string =
@@ -215,6 +228,46 @@ proc edit(mark: var Mark): void =
 
   finally: close(tempFile)
 
+proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int] =
+  let marks = timeline.marks
+  result = sequtils.toSeq(0..<marks.len).filterIt(marks[it].summary != STOP_MSG)
+
+  if args["<firstId>"]:
+    let idx = marks.findById($args["<firstId>"])
+    if idx > 0: result = result.filterIt(it >= idx)
+
+  if args["<lastId>"]:
+    let idx = marks.findById($args["<lastId>"])
+    if (idx > 0): result = result.filterIt(it <= idx)
+
+  if args["--after"]:
+    var startTime: TimeInfo
+    try: startTime = parseTime($args["--after"])
+    except: raise newException(ValueError,
+      "invalid value for --after: " & getCurrentExceptionMsg())
+    result = result.filterIt(marks[it].time > startTime)
+
+  if args["--before"]:
+    var endTime: TimeInfo
+    try: endTime = parseTime($args["--before"])
+    except: raise newException(ValueError,
+      "invalid value for --before: " & getCurrentExceptionMsg())
+    result = result.filterIt(marks[it].time < endTime)
+
+  if args["--tags"]:
+    let tags = (args["--tags"] ?: "").split({',', ';'})
+    result = result.filter(proc (i: int): bool =
+      tags.allIt(marks[i].tags.contains(it)))
+
+  if args["--remove-tags"]:
+    let tags = (args["--remove-tags"] ?: "").split({',', ';'})
+    result = result.filter(proc (i: int): bool =
+      not tags.allIt(marks[i].tags.contains(it)))
+
+  if args["--matching"]:
+    let pattern = re(args["--matching"] ?: "")
+    result = result.filterIt(marks[it].summary.find(pattern).isSome)
+
 when isMainModule:
  try:
   let doc = """
@@ -244,6 +297,7 @@ Options:
   -g --tags <tags>        Add the given tags (comma-separated) to the selected marks.
   -G --remove-tags <tagx> Remove the given tag from the selected marks.
   -h --help               Print this usage information.
+  -m --matching <pattern> Restric the selection to marks matching <pattern>.
   -n --notes <notes>      For add and amend, set the notes for a time mark.
   -t --time <time>        For add and amend, use this time instead of the current time.
   -v --verbose            Include notes in timeline entry output.
@@ -252,9 +306,10 @@ Options:
 # TODO: add    ptk delete [options]
 
   logging.addHandler(newConsoleLogger())
+  let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.2.1")
+  let args = docopt(doc, version = "ptk 0.3.0")
 
   if args["--echo-args"]: echo $args
 
@@ -312,16 +367,15 @@ Options:
 
       let newMark: Mark = (
         id: genUUID(),
-        time:
-          if args["--time"]: parseTime($args["--time"])
-          else: getLocalTime(getTime()),
+        time: if args["--time"]: parseTime($args["--time"]) else: now,
         summary: STOP_MSG,
         notes: args["--notes"] ?: "",
         tags: (args["--tags"] ?: "").split({',', ';'}))
         
       timeline.marks.add(newMark)
-      writeMarks(
-        marks = timeline.marks[timeline.marks.len - 2..<timeline.marks.len],
+
+      timeline.writeMarks(
+        indices = @[timeline.marks.len - 2],
         includeNotes = args["--verbose"])
       echo "stopped timer"
 
@@ -331,23 +385,23 @@ Options:
 
       if timeline.marks.last.summary != STOP_MSG:
         echo "There is already something in progress:"
-        writeMarks(
-          marks = @[timeline.marks.last],
+        timeline.writeMarks(
+          indices = @[timeline.marks.len - 1],
           includeNotes = args["--verbose"])
         quit(0)
 
       let prevMark = timeline.marks[timeline.marks.len - 2]
       var newMark: Mark = (
         id: genUUID(),
-        time:
-          if args["--time"]: parseTime($args["--time"])
-          else: getLocalTime(getTime()),
+        time: if args["--time"]: parseTime($args["--time"]) else: now,
         summary: prevMark.summary,
         notes: prevMark.notes,
         tags: prevMark.tags)
 
       timeline.marks.add(newMark)
-      writeMarks(marks = @[newMark], includeNotes = args["--verbose"])
+      timeline.writeMarks(
+        indices = @[timeline.marks.len - 1],
+        includeNotes = args["--verbose"])
 
       saveTimeline(timeline, timelineLocation)
 
@@ -355,9 +409,7 @@ Options:
 
       var newMark: Mark = (
         id: genUUID(),
-        time:
-          if args["--time"]: parseTime($args["--time"])
-          else: getLocalTime(getTime()),
+        time: if args["--time"]: parseTime($args["--time"]) else: now,
         summary: args["<summary>"] ?: "",
         notes: args["--notes"] ?: "",
         tags: (args["--tags"] ?: "").split({',', ';'}))
@@ -365,7 +417,9 @@ Options:
       if args["--edit"]: edit(newMark)
 
       timeline.marks.add(newMark)
-      writeMarks(marks = @[newMark], includeNotes = args["--verbose"])
+      timeline.writeMarks(
+        indices = @[timeline.marks.len - 1],
+        includeNotes = args["--verbose"])
 
       saveTimeline(timeline, timelineLocation)
 
@@ -391,10 +445,14 @@ Options:
 
       if args["--edit"]: edit(mark)
 
-      writeMarks(marks = @[mark], includeNotes = args["--verbose"])
-
       timeline.marks.delete(markIdx)
       timeline.marks.insert(mark, markIdx)
+
+      timeline.writeMarks(
+        indices = @[markIdx],
+        includeNotes = args["--verbose"])
+
+
       saveTimeline(timeline, timelineLocation)
 
     if args["delete"]:
@@ -405,25 +463,11 @@ Options:
 
     if args["list"] or args["ls"]:
 
-      var marks = timeline.marks
+      var selectedIndices = timeline.filterMarkIndices(args)
 
-      if args["--after"]:
-        var startTime: TimeInfo
-        try: startTime = parseTime($args["--after"])
-        except: raise newException(ValueError,
-          "invalid value for --after: " & getCurrentExceptionMsg())
-        marks = marks.filter(proc(m: Mark): bool = m.time > startTime)
-
-      if args["--before"]:
-        var endTime: TimeInfo
-        try: endTime = parseTime($args["--before"])
-        except: raise newException(ValueError,
-          "invalid value for --before: " & getCurrentExceptionMsg())
-        marks = marks.filter(proc(m: Mark): bool = m.time < endTime)
-
-      marks = marks.sorted(proc(a, b: Mark): int = cmp(a.time, b.time))
-
-      writeMarks(marks = marks, includeNotes = args["--version"])
+      timeline.writeMarks(
+        indices = selectedIndices,
+        includeNotes = args["--version"])
 
     if args["sum-time"]:
     
@@ -435,56 +479,25 @@ Options:
           if markIdx == -1:
             warn "ptk: could not find mark for id " & id
           elif markIdx == timeline.marks.len - 1:
-            intervals.add(getLocalTime(getTime()) - timeline.marks.last.time)
+            intervals.add(now - timeline.marks.last.time)
           else:
             intervals.add(timeline.marks[markIdx + 1].time - timeline.marks[markIdx].time)
 
       else:
 
-        var startIdx = 0
-        var endIdx = timeline.marks.len - 1
+        var indicesToSum = timeline.filterMarkIndices(args)
 
-        if args["<firstId>"]:
-          startIdx = max(timeline.marks.findById($args["<firstId>"]), 0)
-
-        if args["<lastId>"]:
-          let idx = timeline.marks.findById($args["<firstId>"])
-          if (idx > 0): endIdx = idx
-
-        if args["--after"]:
-          var startTime: TimeInfo
-          try: startTime = parseTime($args["--after"])
-          except: raise newException(ValueError,
-            "invalid value for --after: " & getCurrentExceptionMsg())
-          let marks = timeline.marks.filter(proc(m: Mark): bool = m.time > startTime)
-
-          let idx = timeline.marks.findById($marks.first.id)
-          if idx > startIdx: startIdx = idx
-
-        if args["--before"]:
-          var endTime: TimeInfo
-          try: endTime = parseTime($args["--before"])
-          except: raise newException(ValueError,
-            "invalid value for --after: " & getCurrentExceptionMsg())
-          let marks = timeline.marks.filter(proc(m: Mark): bool = m.time < endTime)
-
-          let idx = timeline.marks.findById($marks.last.id)
-          if idx < endIdx: endIdx = idx
-
-        for idx in startIdx..<min(endIdx, timeline.marks.len - 1):
-          if timeline.marks[idx].summary == STOP_MSG: continue # don't count stops
-          intervals.add(timeline.marks[idx + 1].time - timeline.marks[idx].time)
-
-        if endIdx == timeline.marks.len - 1 and
-           timeline.marks.last.summary != STOP_MSG:
-          intervals.add(getLocalTime(getTime()) - timeline.marks.last.time)
+        for idx in indicesToSum:
+          let mark = timeline.marks[idx]
+          if idx == timeline.marks.len - 1: intervals.add(now - mark.time)
+          else: intervals.add(timeline.marks[idx + 1].time - mark.time)
 
       if intervals.len == 0:
         echo "ptk: no marks found"
 
       else:
-        let total = foldl(intervals, a + b)
-        echo total.flexFormat
+        let total = intervals.foldl(a + b)
+        echo flexFormat(total)
  
  except:
   fatal "ptk: " & getCurrentExceptionMsg()
