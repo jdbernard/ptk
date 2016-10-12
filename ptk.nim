@@ -39,6 +39,12 @@ proc parseTime(timeStr: string): TimeInfo =
 
   raise newException(Exception, "unable to interpret as a date: " & timeStr)
 
+proc startOfDay(ti: TimeInfo): TimeInfo =
+  result = ti
+  result.hour = 0
+  result.minute = 0
+  result.second = 0
+
 template `%`(mark: Mark): JsonNode =
   %* {
     "id": $(mark.id),
@@ -99,10 +105,11 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
   var idxs = indices.sorted(
     proc(a, b: int): int = cmp(marks[a].time, marks[b].time))
 
+  let largestInterval = now - marks[idxs.first].time
   let timeFormat =
-    if now - marks[idxs.first].time > 1.years: "yyyy-MM-dd HH:mm"
-    elif now - marks[idxs.first].time > 7.days: "MMM dd HH:mm"
-    elif now - marks[idxs.first].time > 1.days: "ddd HH:mm"
+    if largestInterval > 1.years: "yyyy-MM-dd HH:mm"
+    elif largestInterval > 7.days: "MMM dd HH:mm"
+    elif largestInterval > 1.days: "ddd HH:mm"
     else: "HH:mm"
 
   var toWrite: seq[WriteData] = @[]
@@ -254,6 +261,12 @@ proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int]
       "invalid value for --before: " & getCurrentExceptionMsg())
     result = result.filterIt(marks[it].time < endTime)
 
+  if args["--today"]:
+    let now = getLocalTime(getTime())
+    let b = now.startOfDay
+    let e = b + 1.days
+    result = result.filterIt(marks[it].time >= b and marks[it].time < e)
+
   if args["--tags"]:
     let tags = (args["--tags"] ?: "").split({',', ';'})
     result = result.filter(proc (i: int): bool =
@@ -300,6 +313,7 @@ Options:
   -m --matching <pattern> Restric the selection to marks matching <pattern>.
   -n --notes <notes>      For add and amend, set the notes for a time mark.
   -t --time <time>        For add and amend, use this time instead of the current time.
+  -T --today              Restrict the seelction to marks during today.
   -v --verbose            Include notes in timeline entry output.
 """
 
@@ -309,7 +323,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.3.0")
+  let args = docopt(doc, version = "ptk 0.4.0")
 
   if args["--echo-args"]: echo $args
 
