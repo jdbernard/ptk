@@ -23,7 +23,8 @@ const ISO_TIME_FORMAT = "yyyy:MM:dd'T'HH:mm:ss"
 
 const TIME_FORMATS = @[
     "H:mm", "HH:mm", "H:mm:ss", "HH:mm:ss",
-    "yyyy:MM:dd'T'HH:mm:ss", "yyyy:MM:dd'T'HH:mm"]
+    "yyyy:MM:dd'T'HH:mm:ss", "yyyy:MM:dd'T'HH:mm",
+    "yyyy:MM:dd HH:mm:ss", "yyyy:MM:dd HH:mm"]
 
 #proc `$`*(mark: Mark): string =
   #return (($mark.uuid)[
@@ -323,7 +324,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.4.0")
+  let args = docopt(doc, version = "ptk 0.4.1")
 
   if args["--echo-args"]: echo $args
 
