@@ -40,12 +40,6 @@ proc parseTime(timeStr: string): TimeInfo =
 
   raise newException(Exception, "unable to interpret as a date: " & timeStr)
 
-proc startOfDay(ti: TimeInfo): TimeInfo =
-  result = ti
-  result.hour = 0
-  result.minute = 0
-  result.second = 0
-
 template `%`(mark: Mark): JsonNode =
   %* {
     "id": $(mark.id),
@@ -268,6 +262,18 @@ proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int]
     let e = b + 1.days
     result = result.filterIt(marks[it].time >= b and marks[it].time < e)
 
+  if args["--this-week"]:
+    let now = getLocalTime(getTime())
+    let b = now.startOfWeek(dSun)
+    let e = b + 7.days
+    result = result.filterIt(marks[it].time >= b and marks[it].time < e)
+
+  if args["--last-week"]:
+    let now = getLocalTime(getTime())
+    let e = now.startOfWeek(dSun)
+    let b = e - 7.days
+    result = result.filterIt(marks[it].time >= b and marks[it].time < e)
+
   if args["--tags"]:
     let tags = (args["--tags"] ?: "").split({',', ';'})
     result = result.filter(proc (i: int): bool =
@@ -314,7 +320,9 @@ Options:
   -m --matching <pattern> Restric the selection to marks matching <pattern>.
   -n --notes <notes>      For add and amend, set the notes for a time mark.
   -t --time <time>        For add and amend, use this time instead of the current time.
-  -T --today              Restrict the seelction to marks during today.
+  -T --today              Restrict the selection to marks during today.
+  -w --this-week          Restrict the selection to marks during this week.
+  -W --last-week          Restrict the selection to marks during the last week.
   -v --verbose            Include notes in timeline entry output.
 """
 
@@ -324,7 +332,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.4.1")
+  let args = docopt(doc, version = "ptk 0.5.0")
 
   if args["--echo-args"]: echo $args
 

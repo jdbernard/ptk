@@ -1,3 +1,3 @@
-template first*(s: seq): auto = s[0]
+template first*(a: openarray): auto = a[0]
 
-template last*(s: seq): auto = s[len(s)-1]
+template last*(a: openarray): auto = a[len(a)-1]
