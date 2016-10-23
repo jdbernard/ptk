@@ -4,7 +4,7 @@
 ## Simple time keeping CLI
 
 import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
-  strutils, tempfile, terminal, times, timeutils, uuids
+  sets, strutils, tempfile, terminal, times, timeutils, uuids
 
 import ptkutil
 
@@ -296,6 +296,7 @@ Usage:
   ptk add [options]
   ptk add [options] <summary>
   ptk amend [options] <id> [<summary>]
+  ptk merge <timeline> [<timeline>...]
   ptk stop [options]
   ptk continue
   ptk delete <id>
@@ -332,7 +333,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.5.0")
+  let args = docopt(doc, version = "ptk 0.6.0")
 
   if args["--echo-args"]: echo $args
 
@@ -377,6 +378,30 @@ Options:
   # Execute commands
   if args["init"]:
     doInit(foldl(timelineLocations, if len(a) > 0: a else: b))
+
+  elif args["merge"]:
+
+    let filesToMerge = args["<timeline>"]
+    let timelines = filesToMerge.mapIt(loadTimeline(it))
+
+    let names = timelines.mapIt(it.name).toSet
+    let mergedName = sequtils.toSeq(names.items).foldl(a & " + " & b)
+    var merged: Timeline = (
+      name: mergedName,
+      marks: @[])
+
+    for timeline in timelines:
+      for mark in timeline.marks:
+        var existingMarkIdx = merged.marks.findById($mark.id)
+        if existingMarkIdx >= 0:
+          if merged.marks[existingMarkIdx].summary != mark.summary:
+            merged.marks[existingMarkIdx].summary &= " | " & mark.summary
+          if merged.marks[existingMarkIdx].notes != mark.notes:
+            merged.marks[existingMarkIdx].notes &= "\r\n--------\r\b" & mark.notes
+
+        else: merged.marks.add(mark)
+
+    writeLine(stdout, pretty(%merged))
 
   else:
 
