@@ -19,12 +19,14 @@ let NO_MARK: Mark = (
   time: fromSeconds(0).getLocalTime,
   summary: "", notes: "", tags: @[])
 
-const ISO_TIME_FORMAT = "yyyy:MM:dd'T'HH:mm:ss"
+const ISO_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm:ss"
 
 const TIME_FORMATS = @[
-    "H:mm", "HH:mm", "H:mm:ss", "HH:mm:ss",
-    "yyyy:MM:dd'T'HH:mm:ss", "yyyy:MM:dd'T'HH:mm",
-    "yyyy:MM:dd HH:mm:ss", "yyyy:MM:dd HH:mm"]
+    "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss",
+    "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm",
+    "MM-dd'T'HH:mm:ss", "MM-dd HH:mm:ss",
+    "MM-dd'T'HH:mm", "MM-dd HH:mm",
+    "HH:mm:ss", "H:mm:ss", "H:mm", "HH:mm" ]
 
 #proc `$`*(mark: Mark): string =
   #return (($mark.uuid)[
@@ -62,9 +64,17 @@ proc loadTimeline(filename: string): Timeline =
   var timeline: Timeline = (name: timelineJson["name"].getStr(), marks: @[])
 
   for markJson in timelineJson["marks"]:
+
+    # TODO: an incorrect time format that was used in version 0.6 and prior.
+    # Version 0.7 between 1.0 support this format on read only and will write
+    # out the correct  format (so they can be used to convert older timelines).
+    var time: TimeInfo
+    try: time = parse(markJson["time"].getStr(), ISO_TIME_FORMAT)
+    except: time = parse(markJson["time"].getStr(), "yyyy:MM:dd'T'HH:mm:ss")
+
     timeline.marks.add((
       id: parseUUID(markJson["id"].getStr()),
-      time: parse(markJson["time"].getStr(), ISO_TIME_FORMAT),
+      time: time, #parse(markJson["time"].getStr(), ISO_TIME_FORMAT),
       summary: markJson["summary"].getStr(),
       notes: markJson["notes"].getStr(),
       tags: markJson["tags"].getElems(@[]).map(proc (t: JsonNode): string = t.getStr())))
@@ -333,7 +343,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.6.0")
+  let args = docopt(doc, version = "ptk 0.7.0")
 
   if args["--echo-args"]: echo $args
 
