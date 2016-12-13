@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.7.0"
+version       = "0.8.0"
 author        = "Jonathan Bernard"
 description   = "Personal Time Keeper"
 license       = "MIT"

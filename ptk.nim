@@ -10,7 +10,10 @@ import ptkutil
 
 type
   Mark* = tuple[id: UUID, time: TimeInfo, summary: string, notes: string, tags: seq[string]]
+    ## Representation of a single mark on the timeline.
+
   Timeline* = tuple[name: string, marks: seq[Mark]]
+    ## Representation of a timeline: a name and sequence of Marks.
 
 const STOP_MSG = "STOP"
 
@@ -20,6 +23,7 @@ let NO_MARK: Mark = (
   summary: "", notes: "", tags: @[])
 
 const ISO_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm:ss"
+  ## The canonical time format used by PTK.
 
 const TIME_FORMATS = @[
     "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss",
@@ -27,6 +31,7 @@ const TIME_FORMATS = @[
     "MM-dd'T'HH:mm:ss", "MM-dd HH:mm:ss",
     "MM-dd'T'HH:mm", "MM-dd HH:mm",
     "HH:mm:ss", "H:mm:ss", "H:mm", "HH:mm" ]
+  ## Other time formats that PTK will accept as input.
 
 #proc `$`*(mark: Mark): string =
   #return (($mark.uuid)[
@@ -36,6 +41,7 @@ proc exitErr(msg: string): void =
   quit(QuitFailure)
 
 proc parseTime(timeStr: string): TimeInfo =
+  ## Helper to parse time strings trying multiple known formats. 
   for fmt in TIME_FORMATS:
     try: return parse(timeStr, fmt)
     except: discard nil
@@ -55,6 +61,10 @@ template `%`(timeline: Timeline): JsonNode =
   %* { "name": timeline.name, "marks": timeline.marks }
 
 proc loadTimeline(filename: string): Timeline =
+  ## Load a timeline from a file. Expects a path to a file (can be relative or
+  ## absolute) and returns a Timeline. The marks in the timeline are guaranteed
+  ## to be ordered by time.
+
   var timelineJson: JsonNode
   try: timelineJson = parseFile(filename)
   except:
@@ -85,6 +95,8 @@ proc loadTimeline(filename: string): Timeline =
   return timeline
 
 proc saveTimeline(timeline: Timeline, location: string): void =
+  ## Write the timeline to disk at the file location given.
+
   var timelineFile: File
   try:
     timelineFile = open(location, fmWrite)
@@ -93,6 +105,8 @@ proc saveTimeline(timeline: Timeline, location: string): void =
   finally: close(timelineFile)
 
 proc flexFormat(i: TimeInterval): string =
+  ## Pretty-format a time interval.
+
   let fmt =
     if i > 1.days: "d'd' H'h' m'm'"
     elif i >= 1.hours: "H'h' m'm'"
@@ -104,6 +118,8 @@ proc flexFormat(i: TimeInterval): string =
 type WriteData = tuple[idx: int, mark: Mark, prefixLen: int, interval: TimeInterval]
 
 proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): void =
+  ## Write a nicely-formatted list of Marks to stdout.
+
   let marks = timeline.marks
   let now = getLocalTime(getTime())
 
@@ -162,6 +178,9 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
       writeLine(stdout, "")
 
 proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, includeNotes = false): string =
+  ## Pretty-format a Mark, optionally taking the next Mark in the timeline (to
+  ## compute duration) and a time format string, and conditionally including
+  ## the Mark's notes in the output.
 
   let nextTime =
     if nextMark == NO_MARK: getLocalTime(getTime())
@@ -188,7 +207,17 @@ proc findById(marks: seq[Mark], id: string): int =
 
   return -1
 
+proc getLastIndex(marks: seq[Mark]): int =
+  ## Find and return the index of the last Mark that was not a STOP mark.
+  ## Returns -1 if there is no such last mark.
+
+  var idx = marks.len - 1
+  while idx >= 0 and marks[idx].summary == STOP_MSG: idx -= 1
+  if idx < 0: result = -1
+  else: result = idx
+
 proc doInit(timelineLocation: string): void =
+  ## Interactively initialize a new timeline at the given file path.
 
   stdout.write "Time log name [New Timeline]: "
   let name = stdin.readLine()
@@ -207,6 +236,9 @@ proc doInit(timelineLocation: string): void =
 type ExpectedMarkPart = enum Time, Summary, Tags, Notes
 
 proc edit(mark: var Mark): void =
+  ## Interactively edit a mark using the editor named in the environment
+  ## variable "EDITOR"
+
   var
     tempFile: File
     tempFileName: string
@@ -241,6 +273,9 @@ proc edit(mark: var Mark): void =
   finally: close(tempFile)
 
 proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int] =
+  ## Filter down a set of marks according to options provided in command line
+  ## arguments.
+
   let marks = timeline.marks
   result = sequtils.toSeq(0..<marks.len).filterIt(marks[it].summary != STOP_MSG)
 
@@ -305,7 +340,8 @@ Usage:
   ptk init [options]
   ptk add [options]
   ptk add [options] <summary>
-  ptk amend [options] <id> [<summary>]
+  ptk resume [options] [<id>]
+  ptk amend [options] [<id>] [<summary>]
   ptk merge <timeline> [<timeline>...]
   ptk stop [options]
   ptk continue
@@ -343,7 +379,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.7.0")
+  let args = docopt(doc, version = "ptk 0.8.0")
 
   if args["--echo-args"]: echo $args
 
@@ -474,17 +510,50 @@ Options:
 
       if args["--edit"]: edit(newMark)
 
+      let prevLastIdx = timeline.marks.getLastIndex()
       timeline.marks.add(newMark)
       timeline.writeMarks(
-        indices = @[timeline.marks.len - 1],
+        indices = @[prevLastIdx, timeline.marks.len - 1],
         includeNotes = args["--verbose"])
 
+      saveTimeline(timeline, timelineLocation)
+
+    if args["resume"]:
+
+      var markToResumeIdx: int
+
+      if args["<id>"]:
+        markToResumeIdx = timeline.marks.findById($args["<id>"])
+        if markToResumeIdx == -1: exitErr "Cannot find a mark matching " & $args["<id>"]
+      else: markToResumeIdx = timeline.marks.getLastIndex()
+      var markToResume = timeline.marks[markToResumeIdx]
+      
+      var newMark: Mark = (
+        id: genUUID(),
+        time: if args["--time"]: parseTime($args["--time"]) else: now,
+        summary: markToResume.summary,
+        notes: markToResume.notes,
+        tags: markToResume.tags)
+
+      if args["--edit"]: edit(newMark)
+
+      timeline.marks.add(newMark)
+      timeline.writeMarks(
+        indices = sequtils.toSeq(markToResumeIdx..<timeline.marks.len),
+        includeNotes = args["--verbose"])
+        
       saveTimeline(timeline, timelineLocation)
 
     if args["amend"]:
 
       # Note, this returns a copy, not a reference to the mark in the seq.
-      let markIdx = timeline.marks.findById($args["<id>"])
+      var markIdx: int
+
+      if args["<id>"]:
+        markIdx = timeline.marks.findById($args["<id>"])
+        if markIdx == -1: exitErr "Cannot find a mark matching " & $args["<id>"]
+      else: markIdx = timeline.marks.getLastIndex()
+
       var mark = timeline.marks[markIdx]
       
       if args["<summary>"]: mark.summary = $args["<summary>"]
