@@ -6,7 +6,7 @@
 import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
   sets, strutils, tempfile, terminal, times, timeutils, uuids
 
-import ptkutil
+import private/ptkutil
 
 type
   Mark* = tuple[id: UUID, time: TimeInfo, summary: string, notes: string, tags: seq[string]]
@@ -347,6 +347,7 @@ Usage:
   ptk continue
   ptk delete <id>
   ptk (list | ls) [options]
+  ptk (list | ls) tags
   ptk sum-time --ids <ids>...
   ptk sum-time [options] [<firstId>] [<lastId>]
   ptk (-V | --version)
@@ -379,7 +380,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.8.0")
+  let args = docopt(doc, version = "ptk 0.9.0")
 
   if args["--echo-args"]: echo $args
 
@@ -590,11 +591,17 @@ Options:
 
     if args["list"] or args["ls"]:
 
-      var selectedIndices = timeline.filterMarkIndices(args)
+      if args["tags"]:
 
-      timeline.writeMarks(
-        indices = selectedIndices,
-        includeNotes = args["--version"])
+        echo $(timeline.marks.mapIt(it.tags)
+                .flatten().deduplicate().sorted(system.cmp).join("\n"))
+
+      else:
+        var selectedIndices = timeline.filterMarkIndices(args)
+
+        timeline.writeMarks(
+          indices = selectedIndices,
+          includeNotes = args["--version"])
 
     if args["sum-time"]:
     
