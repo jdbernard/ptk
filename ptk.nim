@@ -380,7 +380,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.9.0")
+  let args = docopt(doc, version = "ptk 0.10.0")
 
   if args["--echo-args"]: echo $args
 
