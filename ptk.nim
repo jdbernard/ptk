@@ -514,7 +514,8 @@ Options:
       let prevLastIdx = timeline.marks.getLastIndex()
       timeline.marks.add(newMark)
       timeline.writeMarks(
-        indices = @[prevLastIdx, timeline.marks.len - 1],
+        indices = if prevLastIdx < 0: @[0]
+                  else: @[prevLastIdx, timeline.marks.len - 1],
         includeNotes = args["--verbose"])
 
       saveTimeline(timeline, timelineLocation)
@@ -526,7 +527,9 @@ Options:
       if args["<id>"]:
         markToResumeIdx = timeline.marks.findById($args["<id>"])
         if markToResumeIdx == -1: exitErr "Cannot find a mark matching " & $args["<id>"]
-      else: markToResumeIdx = timeline.marks.getLastIndex()
+      else:
+        markToResumeIdx = timeline.marks.getLastIndex()
+        if markToResumeIdx < 0: exitErr "No mark to resume."
       var markToResume = timeline.marks[markToResumeIdx]
       
       var newMark: Mark = (
@@ -553,7 +556,9 @@ Options:
       if args["<id>"]:
         markIdx = timeline.marks.findById($args["<id>"])
         if markIdx == -1: exitErr "Cannot find a mark matching " & $args["<id>"]
-      else: markIdx = timeline.marks.getLastIndex()
+      else:
+        markIdx = timeline.marks.getLastIndex()
+        if markIdx < 0: exitErr "No mark to amend."
 
       var mark = timeline.marks[markIdx]
       
