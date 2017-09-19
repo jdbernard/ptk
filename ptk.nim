@@ -154,6 +154,9 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
 
     if prefix.len > longestPrefix: longestPrefix = prefix.len
 
+  let colWidth = 80
+  let notesPrefixLen = 4
+
   for w in toWrite:
     if w.mark.summary == STOP_MSG: continue
 
@@ -174,7 +177,11 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
     writeLine(stdout, "")
 
     if includeNotes and len(w.mark.notes.strip) > 0:
-      writeLine(stdout, spaces(longestPrefix) & w.mark.notes)
+      writeLine(stdout, "")
+      let wrappedNotes = wordWrap(s = w.mark.notes,
+                                  maxLineWidth = colWidth)
+      for line in splitLines(wrappedNotes):
+        writeLine(stdout, spaces(notesPrefixLen) & line)
       writeLine(stdout, "")
 
 proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, includeNotes = false): string =
@@ -190,13 +197,12 @@ proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, in
   # TODO: pick up here calculating the time between marks
 
   let prefix = ($mark.id)[0..<8] & "  " & mark.time.format(timeFormat) & " (" & duration & ") -- "
-  let prefixLen = len(($mark.id)[0..<8] & "  " & mark.time.format(timeFormat) & " (" & duration & ") -- ")
 
   result = prefix & mark.summary
   if includeNotes and len(mark.notes.strip()) > 0:
-    let wrappedNotes = wordWrap(s = mark.notes, maxLineWidth = 80 - prefixLen)
+    let wrappedNotes = wordWrap(s = mark.notes, maxLineWidth = 80 - prefix.len)
     for line in splitLines(wrappedNotes):
-      result &= "\x0D\x0A" & spaces(prefixLen) & line
+      result &= "\x0D\x0A" & spaces(prefix.len) & line
     result &= "\x0D\x0A"
 
 proc findById(marks: seq[Mark], id: string): int =
@@ -348,6 +354,7 @@ Usage:
   ptk delete <id>
   ptk (list | ls) [options]
   ptk (list | ls) tags
+  ptk current
   ptk sum-time --ids <ids>...
   ptk sum-time [options] [<firstId>] [<lastId>]
   ptk (-V | --version)
@@ -380,7 +387,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.10.0")
+  let args = docopt(doc, version = "ptk 0.11.0")
 
   if args["--echo-args"]: echo $args
 
@@ -606,7 +613,17 @@ Options:
 
         timeline.writeMarks(
           indices = selectedIndices,
-          includeNotes = args["--version"])
+          includeNotes = args["--verbose"])
+
+    if args["current"]:
+
+      let idx = timeline.marks.len - 1
+      if timeline.marks[idx].summary == STOP_MSG:
+        echo "ptk: no current task"
+      else:
+        timeline.writeMarks(
+          indices = @[idx],
+          includeNotes = true)
 
     if args["sum-time"]:
     
