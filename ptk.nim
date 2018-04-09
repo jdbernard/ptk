@@ -344,8 +344,8 @@ when isMainModule:
   let doc = """
 Usage:
   ptk init [options]
-  ptk add [options]
-  ptk add [options] <summary>
+  ptk (add | start) [options]
+  ptk (add | start) [options] <summary>
   ptk resume [options] [<id>]
   ptk amend [options] [<id>] [<summary>]
   ptk merge <timeline> [<timeline>...]
@@ -387,7 +387,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.11.1")
+  let args = docopt(doc, version = "ptk 0.11.2")
 
   if args["--echo-args"]: echo $args
 
@@ -507,7 +507,7 @@ Options:
 
       saveTimeline(timeline, timelineLocation)
 
-    if args["add"]:
+    if args["add"] or args["start"]:
 
       var newMark: Mark = (
         id: genUUID(),
