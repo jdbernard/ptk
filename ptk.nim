@@ -387,7 +387,7 @@ Options:
   let now = getLocalTime(getTime())
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.11.2")
+  let args = docopt(doc, version = "ptk 0.11.3")
 
   if args["--echo-args"]: echo $args
 
@@ -472,7 +472,7 @@ Options:
         time: if args["--time"]: parseTime($args["--time"]) else: now,
         summary: STOP_MSG,
         notes: args["--notes"] ?: "",
-        tags: (args["--tags"] ?: "").split({',', ';'}))
+        tags: (args["--tags"] ?: "").split({',', ';'}).filterIt(not it.isNilOrWhitespace))
         
       timeline.marks.add(newMark)
 
@@ -514,7 +514,7 @@ Options:
         time: if args["--time"]: parseTime($args["--time"]) else: now,
         summary: args["<summary>"] ?: "",
         notes: args["--notes"] ?: "",
-        tags: (args["--tags"] ?: "").split({',', ';'}))
+        tags: (args["--tags"] ?: "").split({',', ';'}).filterIt(not it.isNilOrWhitespace))
 
       if args["--edit"]: edit(newMark)
 
