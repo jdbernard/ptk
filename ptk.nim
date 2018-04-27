@@ -9,7 +9,7 @@ import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
 import private/ptkutil
 
 type
-  Mark* = tuple[id: UUID, time: TimeInfo, summary: string, notes: string, tags: seq[string]]
+  Mark* = tuple[id: UUID, time: DateTime, summary: string, notes: string, tags: seq[string]]
     ## Representation of a single mark on the timeline.
 
   Timeline* = tuple[name: string, marks: seq[Mark]]
@@ -19,7 +19,7 @@ const STOP_MSG = "STOP"
 
 let NO_MARK: Mark = (
   id: parseUUID("00000000-0000-0000-0000-000000000000"),
-  time: fromSeconds(0).getLocalTime,
+  time: fromUnix(0).local,
   summary: "", notes: "", tags: @[])
 
 const ISO_TIME_FORMAT = "yyyy-MM-dd'T'HH:mm:ss"
@@ -40,7 +40,7 @@ proc exitErr(msg: string): void =
   fatal "ptk: " & msg
   quit(QuitFailure)
 
-proc parseTime(timeStr: string): TimeInfo =
+proc parseTime(timeStr: string): DateTime =
   ## Helper to parse time strings trying multiple known formats. 
   for fmt in TIME_FORMATS:
     try: return parse(timeStr, fmt)
@@ -78,7 +78,7 @@ proc loadTimeline(filename: string): Timeline =
     # TODO: an incorrect time format that was used in version 0.6 and prior.
     # Version 0.7 between 1.0 support this format on read only and will write
     # out the correct  format (so they can be used to convert older timelines).
-    var time: TimeInfo
+    var time: DateTime
     try: time = parse(markJson["time"].getStr(), ISO_TIME_FORMAT)
     except: time = parse(markJson["time"].getStr(), "yyyy:MM:dd'T'HH:mm:ss")
 
@@ -121,7 +121,11 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
   ## Write a nicely-formatted list of Marks to stdout.
 
   let marks = timeline.marks
-  let now = getLocalTime(getTime())
+  let now = getTime().local
+
+  if indices.len == 0:
+    writeLine(stdout, "No marks match the given criteria.")
+    return
 
   var idxs = indices.sorted(
     proc(a, b: int): int = cmp(marks[a].time, marks[b].time))
@@ -190,7 +194,7 @@ proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, in
   ## the Mark's notes in the output.
 
   let nextTime =
-    if nextMark == NO_MARK: getLocalTime(getTime())
+    if nextMark == NO_MARK: getTime().local
     else: nextMark.time
 
   let duration = (nextTime - mark.time).flexFormat
@@ -283,61 +287,80 @@ proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int]
   ## arguments.
 
   let marks = timeline.marks
-  result = sequtils.toSeq(0..<marks.len).filterIt(marks[it].summary != STOP_MSG)
+  let now = getTime().local
+  let allIndices = sequtils.toSeq(0..<marks.len).filterIt(marks[it].summary != STOP_MSG).toSet
+  let union = args["--or"]
+
+  var selected =
+    if union: initSet[int]()
+    else: allIndices
+
+  template filterMarks(curSet: HashSet[int], pred: untyped): untyped =
+    var res: HashSet[int] = initSet[int]()
+    if union:
+      for mIdx {.inject.} in allIndices:
+        if pred: res.incl(mIdx)
+      res = res + curSet
+    else:
+      for mIdx {.inject.} in curSet:
+        if pred: res.incl(mIdx)
+    res
 
   if args["<firstId>"]:
     let idx = marks.findById($args["<firstId>"])
-    if idx > 0: result = result.filterIt(it >= idx)
+    if idx > 0: selected = selected.filterMarks(mIdx >= idx)
 
   if args["<lastId>"]:
     let idx = marks.findById($args["<lastId>"])
-    if (idx > 0): result = result.filterIt(it <= idx)
+    if (idx > 0): selected = selected.filterMarks(mIdx <= idx)
 
   if args["--after"]:
-    var startTime: TimeInfo
+    var startTime: DateTime
     try: startTime = parseTime($args["--after"])
     except: raise newException(ValueError,
       "invalid value for --after: " & getCurrentExceptionMsg())
-    result = result.filterIt(marks[it].time > startTime)
+    selected = selected.filterMarks(marks[mIdx].time > startTime)
 
   if args["--before"]:
-    var endTime: TimeInfo
+    var endTime: DateTime
     try: endTime = parseTime($args["--before"])
     except: raise newException(ValueError,
       "invalid value for --before: " & getCurrentExceptionMsg())
-    result = result.filterIt(marks[it].time < endTime)
+    selected = selected.filterMarks(marks[mIdx].time < endTime)
 
   if args["--today"]:
-    let now = getLocalTime(getTime())
     let b = now.startOfDay
     let e = b + 1.days
-    result = result.filterIt(marks[it].time >= b and marks[it].time < e)
+    selected = selected.filterMarks(marks[mIdx].time >= b and marks[mIdx].time < e)
+
+  if args["--yesterday"]:
+    let e = now.startOfDay
+    let b = e - 1.days
+    selected = selected.filterMarks(marks[mIdx].time >= b and marks[mIdx].time < e)
 
   if args["--this-week"]:
-    let now = getLocalTime(getTime())
     let b = now.startOfWeek(dSun)
     let e = b + 7.days
-    result = result.filterIt(marks[it].time >= b and marks[it].time < e)
+    selected = selected.filterMarks(marks[mIdx].time >= b and marks[mIdx].time < e)
 
   if args["--last-week"]:
-    let now = getLocalTime(getTime())
     let e = now.startOfWeek(dSun)
     let b = e - 7.days
-    result = result.filterIt(marks[it].time >= b and marks[it].time < e)
+    selected = selected.filterMarks(marks[mIdx].time >= b and marks[mIdx].time < e)
 
   if args["--tags"]:
     let tags = (args["--tags"] ?: "").split({',', ';'})
-    result = result.filter(proc (i: int): bool =
-      tags.allIt(marks[i].tags.contains(it)))
+    selected = selected.filterMarks(tags.allIt(marks[mIdx].tags.contains(it)))
 
   if args["--remove-tags"]:
     let tags = (args["--remove-tags"] ?: "").split({',', ';'})
-    result = result.filter(proc (i: int): bool =
-      not tags.allIt(marks[i].tags.contains(it)))
+    selected = selected.filterMarks(not tags.allIt(marks[mIdx].tags.contains(it)))
 
   if args["--matching"]:
     let pattern = re(args["--matching"] ?: "")
-    result = result.filterIt(marks[it].summary.find(pattern).isSome)
+    selected = selected.filterMarks(marks[mIdx].summary.find(pattern).isSome)
+
+  return sequtils.toSeq(selected.items).sorted(system.cmp)
 
 when isMainModule:
  try:
@@ -376,18 +399,21 @@ Options:
   -n --notes <notes>      For add and amend, set the notes for a time mark.
   -t --time <time>        For add and amend, use this time instead of the current time.
   -T --today              Restrict the selection to marks during today.
+  -Y --yesterday          Restrict the selection to marks during yesterday.
   -w --this-week          Restrict the selection to marks during this week.
   -W --last-week          Restrict the selection to marks during the last week.
+  -O --or                 Create a union from the time conditionals, not an intersection
+                          (e.g. --today --or --yesterday)
   -v --verbose            Include notes in timeline entry output.
 """
 
 # TODO: add    ptk delete [options]
 
   logging.addHandler(newConsoleLogger())
-  let now = getLocalTime(getTime())
+  let now = getTime().local
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.11.3")
+  let args = docopt(doc, version = "ptk 0.12.0")
 
   if args["--echo-args"]: echo $args
 
