@@ -357,7 +357,7 @@ proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int]
     selected = selected.filterMarks(not tags.allIt(marks[mIdx].tags.contains(it)))
 
   if args["--matching"]:
-    let pattern = re(args["--matching"] ?: "")
+    let pattern = re("(?i)" & $(args["--matching"] ?: ""))
     selected = selected.filterMarks(marks[mIdx].summary.find(pattern).isSome)
 
   return sequtils.toSeq(selected.items).sorted(system.cmp)
@@ -413,7 +413,7 @@ Options:
   let now = getTime().local
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.12.0")
+  let args = docopt(doc, version = "ptk 0.12.1")
 
   if args["--echo-args"]: echo $args
 
