@@ -413,7 +413,7 @@ Options:
   let now = getTime().local
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.12.1")
+  let args = docopt(doc, version = "ptk 0.12.2")
 
   if args["--echo-args"]: echo $args
 
@@ -492,6 +492,10 @@ Options:
     var timeline = loadTimeline(timelineLocation)
 
     if args["stop"]:
+
+      if timeline.marks.last.summary == STOP_MSG:
+        echo "no current task, nothing to stop"
+        quit(0)
 
       let newMark: Mark = (
         id: genUUID(),
