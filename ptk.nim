@@ -413,7 +413,7 @@ Options:
   let now = getTime().local
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.12.2")
+  let args = docopt(doc, version = "ptk 0.12.3")
 
   if args["--echo-args"]: echo $args
 
@@ -494,7 +494,7 @@ Options:
     if args["stop"]:
 
       if timeline.marks.last.summary == STOP_MSG:
-        echo "no current task, nothing to stop"
+        echo "ptk: no current task, nothing to stop"
         quit(0)
 
       let newMark: Mark = (
@@ -509,14 +509,14 @@ Options:
       timeline.writeMarks(
         indices = @[timeline.marks.len - 2],
         includeNotes = args["--verbose"])
-      echo "stopped timer"
+      echo "ptk: stopped timer"
 
       saveTimeline(timeline, timelineLocation)
 
     if args["continue"]:
 
       if timeline.marks.last.summary != STOP_MSG:
-        echo "There is already something in progress:"
+        echo "ptk: there is already something in progress:"
         timeline.writeMarks(
           indices = @[timeline.marks.len - 1],
           includeNotes = args["--verbose"])
