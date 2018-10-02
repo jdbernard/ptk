@@ -188,27 +188,6 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
         writeLine(stdout, spaces(notesPrefixLen) & line)
       writeLine(stdout, "")
 
-proc formatMark(mark: Mark, nextMark = NO_MARK, timeFormat = ISO_TIME_FORMAT, includeNotes = false): string =
-  ## Pretty-format a Mark, optionally taking the next Mark in the timeline (to
-  ## compute duration) and a time format string, and conditionally including
-  ## the Mark's notes in the output.
-
-  let nextTime =
-    if nextMark == NO_MARK: getTime().local
-    else: nextMark.time
-
-  let duration = (nextTime - mark.time).flexFormat
-  # TODO: pick up here calculating the time between marks
-
-  let prefix = ($mark.id)[0..<8] & "  " & mark.time.format(timeFormat) & " (" & duration & ") -- "
-
-  result = prefix & mark.summary
-  if includeNotes and len(mark.notes.strip()) > 0:
-    let wrappedNotes = wordWrap(s = mark.notes, maxLineWidth = 80 - prefix.len)
-    for line in splitLines(wrappedNotes):
-      result &= "\x0D\x0A" & spaces(prefix.len) & line
-    result &= "\x0D\x0A"
-
 proc findById(marks: seq[Mark], id: string): int =
   var idx = 0
   for mark in marks:
@@ -407,13 +386,12 @@ Options:
   -v --verbose            Include notes in timeline entry output.
 """
 
-# TODO: add    ptk delete [options]
 
   logging.addHandler(newConsoleLogger())
   let now = getTime().local
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.12.3")
+  let args = docopt(doc, version = "ptk 0.12.4")
 
   if args["--echo-args"]: echo $args
 
@@ -423,7 +401,7 @@ Options:
 
   # Find and parse the .ptkrc file
   let ptkrcLocations = @[
-    if args["--config"]: $args["<cfgFile>"] else:"",
+    if args["--config"]: $args["--config"] else:"",
     ".ptkrc", $getEnv("PTKRC"), $getEnv("HOME") & "/.ptkrc"]
 
   var ptkrcFilename: string =
@@ -447,7 +425,7 @@ Options:
 
   # Find the time log file
   let timelineLocations = @[
-    if args["--file"]: $args["<file>"] else: "",
+    if args["--file"]: $args["--file"] else: "",
     $getEnv("PTK_FILE"),
     cfg["timelineLogFile"].getStr(""),
     "ptk.log.json"]
