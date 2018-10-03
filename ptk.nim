@@ -9,6 +9,7 @@ import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
 import private/util
 import private/api
 import private/models
+import private/version
 
 #proc `$`*(mark: Mark): string =
   #return (($mark.uuid)[
@@ -255,6 +256,7 @@ Usage:
   ptk current
   ptk sum-time --ids <ids>...
   ptk sum-time [options] [<firstId>] [<lastId>]
+  ptk serve-api <svcCfg> [--port <port>]
   ptk (-V | --version)
   ptk (-h | --help)
 
@@ -287,7 +289,7 @@ Options:
   let now = getTime().local
 
   # Parse arguments
-  let args = docopt(doc, version = "ptk 0.12.4")
+  let args = docopt(doc, version = PTK_VERSION)
 
   if args["--echo-args"]: echo $args
 
@@ -377,7 +379,7 @@ Options:
         summary: STOP_MSG,
         notes: args["--notes"] ?: "",
         tags: (args["--tags"] ?: "").split({',', ';'}).filterIt(not it.isNilOrWhitespace))
-        
+
       timeline.marks.add(newMark)
 
       timeline.writeMarks(
@@ -442,7 +444,7 @@ Options:
         markToResumeIdx = timeline.marks.getLastIndex()
         if markToResumeIdx < 0: exitErr "No mark to resume."
       var markToResume = timeline.marks[markToResumeIdx]
-      
+
       var newMark: Mark = (
         id: genUUID(),
         time: if args["--time"]: parseTime($args["--time"]) else: now,
@@ -456,7 +458,7 @@ Options:
       timeline.writeMarks(
         indices = sequtils.toSeq(markToResumeIdx..<timeline.marks.len),
         includeNotes = args["--verbose"])
-        
+
       saveTimeline(timeline, timelineLocation)
 
     if args["amend"]:
@@ -472,7 +474,7 @@ Options:
         if markIdx < 0: exitErr "No mark to amend."
 
       var mark = timeline.marks[markIdx]
-      
+
       if args["<summary>"]: mark.summary = $args["<summary>"]
       if args["--notes"]: mark.notes = $args["<notes>"]
       if args["--tags"]:
@@ -530,7 +532,7 @@ Options:
           includeNotes = true)
 
     if args["sum-time"]:
-    
+
       var intervals: seq[TimeInterval] = @[]
 
       if args["--ids"]:
@@ -558,7 +560,17 @@ Options:
       else:
         let total = intervals.foldl(a + b)
         echo flexFormat(total)
- 
+
+    if args["serve-api"]:
+
+      if not fileExists($args["<svcCfg>"]):
+        exitErr "cannot find service config file: '" & $args["<svcCfg>"]
+
+      var apiCfg = loadApiConfig(parseFile($args["<svcCfg>"]))
+      if args["--port"]: apiCfg.port = parseInt($args["--port"])
+
+      start_api(apiCfg)
+
  except:
   fatal "ptk: " & getCurrentExceptionMsg()
   quit(QuitFailure)

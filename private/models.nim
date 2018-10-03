@@ -1,5 +1,7 @@
 import algorithm, json, sequtils, strutils, times, timeutils, uuids
 
+import ./util
+
 type
   Mark* = tuple[id: UUID, time: DateTime, summary: string, notes: string, tags: seq[string]]
     ## Representation of a single mark on the timeline.
@@ -25,9 +27,18 @@ const TIME_FORMATS* = @[
     "HH:mm:ss", "H:mm:ss", "H:mm", "HH:mm" ]
   ## Other time formats that PTK will accept as input.
 
+proc getOrFail*(n: JsonNode, key: string, objName: string = ""): JsonNode =
+  ## convenience method to get a key from a JObject or raise an exception
+  if not n.hasKey(key): raiseEx objName & " missing key '" & key & "'"
+  return n[key]
+
+proc getIfExists*(n: JsonNode, key: string): JsonNode =
+  ## convenience method to get a key from a JObject or return null
+  result = if n.hasKey(key): n[key]
+           else: newJNull()
 
 proc parseTime*(timeStr: string): DateTime =
-  ## Helper to parse time strings trying multiple known formats. 
+  ## Helper to parse time strings trying multiple known formats.
   for fmt in TIME_FORMATS:
     try: return parse(timeStr, fmt)
     except: discard nil
@@ -36,16 +47,9 @@ proc parseTime*(timeStr: string): DateTime =
 
 proc parseMark*(json: JsonNode): Mark =
 
-  # TODO: an incorrect time format that was used in version 0.6 and prior.
-  # Version 0.7 between 1.0 support this format on read only and will write
-  # out the correct  format (so they can be used to convert older timelines).
-  var time: DateTime
-  try: time = parse(json["time"].getStr(), ISO_TIME_FORMAT)
-  except: time = parse(json["time"].getStr(), "yyyy:MM:dd'T'HH:mm:ss")
-
   return (
       id: parseUUID(json["id"].getStr()),
-      time: time, #parse(json["time"].getStr(), ISO_TIME_FORMAT),
+      time: parse(json["time"].getStr(), ISO_TIME_FORMAT),
       summary: json["summary"].getStr(),
       notes: json["notes"].getStr(),
       tags: json["tags"].getElems(@[]).map(proc (t: JsonNode): string = t.getStr()))

@@ -2,14 +2,17 @@
 ## ===================================
 
 import asyncdispatch, base64, bcrypt, cliutils, docopt, jester, json, logging,
-  ospaths, sequtils, strutils, os
+  ospaths, sequtils, strutils, os, times, uuids
+
 import nre except toSeq
 
 import ./models
+import ./util
+import ./version
 
 type
   PtkUser* = object
-    username*, salt*, pwdhash*, timelinePath: string
+    username*, salt*, pwdhash*, timelinePath*: string
     isAdmin*: bool
 
   PtkApiCfg* = object
@@ -20,7 +23,19 @@ type
 const TXT = "text/plain"
 const JSON = "application/json"
 
-proc raiseEx(reason: string): void = raise newException(Exception, reason)
+proc parseUser(json: JsonNode): PtkUser =
+  result = Ptkuser(
+    username: json.getOrFail("username").getStr,
+    salt: json.getOrFail("salt").getStr,
+    pwdHash: json.getOrFail("pwdhash").getStr,
+    timelinePath: json.getOrFail("timelinePath").getStr,
+    isAdmin: json.getIfExists("isAdmin").getBool(false))
+
+proc loadApiConfig*(json: JsonNode): PtkApiCfg =
+  result = PtkApiCfg(
+    port: parseInt(json.getIfExists("port").getStr("3280")),
+    dataDir: json.getOrFail("dataDir").getStr,
+    users: json.getIfExists("users").getElems(@[]).mapIt(parseUser(it)))
 
 template checkAuth(cfg: PtkApiCfg) =
   ## Check this request for authentication and authorization information.
@@ -69,18 +84,8 @@ proc parseAndRun(user: PtkUser, cmd: string, params: StringTableRef): string =
   if execResult[2] != 0: raiseEx(stripAnsi($execResult[0] & "\n" & $execResult[1]))
   else: return stripAnsi(execResult[0])
 
-proc getOrFail(n: JsonNode, key: string, objName: string = ""): JsonNode =
-  ## convenience method to get a key from a JObject or raise an exception
-  if not n.hasKey(key): raiseEx objName & " missing key '" & key & "'"
-  return n[key]
-
-proc getIfExists(n: JsonNode, key: string): JsonNode =
-  ## convenience method to get a key from a JObject or return null
-  result = if n.hasKey(key): n[key]
-           else: newJNull()
-
-proc parseUser(json: JsonNode): PtkUser =
-  let salt = gensalt(12)
+proc apiParseUser(json: JsonNode): PtkUser =
+  let salt = genSalt(12)
 
   return PtkUser(
     username: json.getOrFail("username").getStr,
@@ -89,7 +94,24 @@ proc parseUser(json: JsonNode): PtkUser =
     timelinePath: json.getIfExists("timelinePath").getStr(""),
     isAdmin: false)
 
-proc start*(cfg: PtkApiCfg) =
+proc apiParseMark(json: JsonNode): Mark =
+
+  if not json.hasKey("id"): json["id"] = %($genUUID())
+  if not json.hasKey("summary"): raiseEx "cannot parse mark: missing 'summary'"
+  if not json.hasKey("time"): json["time"] = %(getTime().local.format(ISO_TIME_FORMAT))
+
+  return parseMark(json)
+
+proc patchMark(m: Mark, j: JsonNode): Mark =
+  result = m
+
+  if j.hasKey("summary"): result.summary = j["summary"].getStr
+  if j.hasKey("notes"): result.notes = j["notes"].getStr
+  if j.hasKey("tags"):
+    result.tags = j["tags"].getElems(@[]).map(proc (t: JsonNode): string = t.getStr())
+  if j.hasKey("time"): result.time = parse(j["time"].getStr(), ISO_TIME_FORMAT)
+
+proc start_api*(cfg: PtkApiCfg) =
 
   var stopFuture = newFuture[void]()
 
@@ -99,7 +121,7 @@ proc start*(cfg: PtkApiCfg) =
 
   routes:
 
-    get "/ping": resp("pong", TXT)
+    get "/version": resp("ptk v" & PTK_VERSION, TXT)
 
     get "/marks":
       checkAuth(cfg); if not authed: return true
@@ -107,21 +129,98 @@ proc start*(cfg: PtkApiCfg) =
       try: resp(parseAndRun(user, "list", request.params), TXT)
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
+    post "/continue":
+      checkAuth(cfg); if not authed: return true
+
+      try: resp(parseAndRun(user, "continue", request.params), TXT)
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
+
+    post "/sum-time":
+      checkAuth(cfg); if not authed: return true
+
+      try: resp(parseAndRun(user, "sum-time", request.params), TXT)
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
+
     post "/mark":
       checkAuth(cfg); if not authed: return true
 
       var newMark: Mark
-      try: newMark = parseMark(parseJson(request.body))
+      try: newMark = apiParseMark(parseJson(request.body))
       except: resp(Http400, getCurrentExceptionMsg(), TXT)
 
-      var params = newStringTable
+      try:
+        var timeline = loadTimeline(user.timelinePath)
+        timeline.marks.add(newMark)
+        saveTimeline(timeline, user.timelinePath)
+        resp(Http201, "ok", TXT)
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
+
+    post "/stop":
+      checkAuth(cfg); if not authed: return true
+
+      var newMark: Mark
+      try:
+        var json = parseJson(request.body)
+        json["summary"] = %STOP_MSG
+        json["id"] = %($genUUID())
+        newMark = apiParseMark(json)
+      except: resp(Http400, getCurrentExceptionMsg(), TXT)
+
+      try:
+        var timeline = loadTimeline(user.timelinePath)
+        timeline.marks.add(newMark)
+        saveTimeline(timeline, user.timelinePath)
+        resp(Http201, "ok", TXT)
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
+
+    post "/resume/@id":
+      checkAuth(cfg); if not authed: return true
+
+      var timeline: Timeline
+      try: timeline = loadTimeline(user.timelinePath)
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
+
+      var newMark: Mark
+      try:
+        let origMarkIdx = timeline.marks.findById(@"id")
+        if origMarkIdx < 0: resp(Http404, "no mark for id: " & @"id", TXT)
+        let origMark = timeline.marks[origMarkIdx]
+
+        newMark = origMark
+        newMark.id = genUUID()
+        newMark.time = getTime().local
+        newMark = newMark.patchMark(parseJson(request.body))
+      except: resp(Http400, getCurrentExceptionMsg(), TXT)
+
+      try:
+        timeline.marks.add(newMark)
+        timeline.saveTimeline(user.timelinePath)
+        resp(Http201, "ok", TXT)
+
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
+
+    post "/amend/@id":
+      checkAuth(cfg); if not authed: return true
+
+      try:
+        var timeline = loadTimeline(user.timelinePath)
+
+        let idx = timeline.marks.findById(@"id")
+        if idx < 0: resp(Http404, "no mark for id: " & @"id", TXT)
+
+        timeline.marks[idx] = timeline.marks[idx].patchMark(parseJson(request.body))
+
+        timeline.saveTimeline(user.timelinePath)
+        resp(Http202, $(%timeline.marks[idx]), JSON)
+
+      except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/users":
       checkAuth(cfg); if not authed: return true
       if not user.isAdmin: resp(Http403, "insufficient permission", TXT)
 
       var newUser: PtkUser
-      try: newUser = parseUser(parseJson(request.body))
+      try: newUser = apiParseUser(parseJson(request.body))
       except: resp(Http400, getCurrentExceptionMsg(), TXT)
 
       if cfg.users.anyIt(it.username == newUser.username):
@@ -136,3 +235,5 @@ proc start*(cfg: PtkApiCfg) =
         resp(Http200, "ok", TXT)
 
       except: resp(Http500, "could not init new user timeline", TXT)
+
+  waitFor(stopFuture)

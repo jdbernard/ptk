@@ -6,3 +6,6 @@ proc flatten*[T](a: seq[seq[T]]): seq[T] =
   result = @[]
   for subseq in a:
     result.add(subseq)
+
+
+proc raiseEx*(reason: string): void = raise newException(Exception, reason)
