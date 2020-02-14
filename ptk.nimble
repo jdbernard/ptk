@@ -9,5 +9,15 @@ bin           = @["ptk"]
 
 # Dependencies
 
-requires @["nim >= 0.18.0", "docopt >= 0.6.4", "uuids", "langutils", "tempfile", "timeutils >= 0.2.2", "isaac >= 0.1.2", "bcrypt", "cliutils >= 0.5.0", "jester 0.2.0"]
-
+requires @[
+  "nim >= 1.0.0",
+  "docopt >= 0.6.8",
+  "uuids",
+  "tempfile",
+  "isaac >= 0.1.3",
+  "bcrypt",
+  "jester 0.4.1",
+  "https://git.jdb-labs.com/jdb/nim-lang-utils.git",
+  "https://git.jdb-labs.com/jdb/nim-cli-utils.git",
+  "https://git.jdb-labs.com/jdb/nim-time-utils.git >= 0.5.2"
+]

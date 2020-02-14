@@ -2,7 +2,7 @@
 ## ===================================
 
 import asyncdispatch, base64, bcrypt, cliutils, docopt, jester, json, logging,
-  ospaths, sequtils, strutils, os, times, uuids
+  ospaths, sequtils, strutils, os, tables, times, uuids
 
 import nre except toSeq
 
@@ -37,10 +37,25 @@ proc loadApiConfig*(json: JsonNode): PtkApiCfg =
     dataDir: json.getOrFail("dataDir").getStr,
     users: json.getIfExists("users").getElems(@[]).mapIt(parseUser(it)))
 
+template halt(code: HttpCode,
+              headers: RawHeaders,
+              content: string): typed =
+  ## Immediately replies with the specified request. This means any further
+  ## code will not be executed after calling this template in the current
+  ## route.
+  bind TCActionSend, newHttpHeaders
+  result[0] = CallbackAction.TCActionSend
+  result[1] = code
+  result[2] = some(headers)
+  result[3] = content
+  result.matched = true
+  break allRoutes
+
+
 template checkAuth(cfg: PtkApiCfg) =
   ## Check this request for authentication and authorization information.
-  ## If the request is not authorized, this template sets up the 401 response
-  ## correctly. The calling context needs only to return from the route.
+  ## If the request is not authorized, this template immediately returns a
+  ## 401 Unauthotized response 
 
   var authed {.inject.} = false
   var user {.inject.}: PtkUser = PtkUser()
@@ -67,13 +82,12 @@ template checkAuth(cfg: PtkApiCfg) =
 
   except:
     stderr.writeLine "Auth failed: " & getCurrentExceptionMsg()
-    response.data[0] = CallbackAction.TCActionSend
-    response.data[1] = Http401
-    response.data[2]["WWW_Authenticate"] = "Basic"
-    response.data[2]["Content-Type"] = TXT
-    response.data[3] = getCurrentExceptionMsg()
+    halt(
+      Http401,
+      @{"Content-Type": TXT, "WWW_Authenticate": "Basic" },
+      getCurrentExceptionMsg())
 
-proc parseAndRun(user: PtkUser, cmd: string, params: StringTableRef): string =
+proc parseAndRun(user: PtkUser, cmd: string, params: Table[string, string]): string =
 
   var args = queryParamsToCliArgs(params)
   args = @[cmd, "--file", user.timelinePath] & args
@@ -124,25 +138,25 @@ proc start_api*(cfg: PtkApiCfg) =
     get "/version": resp("ptk v" & PTK_VERSION, TXT)
 
     get "/marks":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       try: resp(parseAndRun(user, "list", request.params), TXT)
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/continue":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       try: resp(parseAndRun(user, "continue", request.params), TXT)
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/sum-time":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       try: resp(parseAndRun(user, "sum-time", request.params), TXT)
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/mark":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       var newMark: Mark
       try: newMark = apiParseMark(parseJson(request.body))
@@ -156,7 +170,7 @@ proc start_api*(cfg: PtkApiCfg) =
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/stop":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       var newMark: Mark
       try:
@@ -174,7 +188,7 @@ proc start_api*(cfg: PtkApiCfg) =
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/resume/@id":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       var timeline: Timeline
       try: timeline = loadTimeline(user.timelinePath)
@@ -200,7 +214,7 @@ proc start_api*(cfg: PtkApiCfg) =
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/amend/@id":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
 
       try:
         var timeline = loadTimeline(user.timelinePath)
@@ -216,7 +230,7 @@ proc start_api*(cfg: PtkApiCfg) =
       except: resp(Http500, getCurrentExceptionMsg(), TXT)
 
     post "/users":
-      checkAuth(cfg); if not authed: return true
+      checkAuth(cfg)
       if not user.isAdmin: resp(Http403, "insufficient permission", TXT)
 
       var newUser: PtkUser
@@ -229,7 +243,7 @@ proc start_api*(cfg: PtkApiCfg) =
       newUser.timelinePath = cfg.dataDir / newUser.username & ".timeline.json"
 
       try:
-        discard parseAndRun(newUser, "init", newStringTable())
+        discard parseAndRun(newUser, "init", initTable[string,string]())
         # TODO: save updated config!
         # cfg.users.add(newUser)
         resp(Http200, "ok", TXT)

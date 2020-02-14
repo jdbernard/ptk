@@ -4,7 +4,9 @@
 ## Simple time keeping CLI
 
 import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
-  sets, strutils, tempfile, terminal, times, timeutils, uuids
+  sets, strutils, tempfile, terminal, times, uuids
+
+import timeutils except `-`;
 
 import private/util
 import private/api
@@ -18,18 +20,18 @@ proc exitErr(msg: string): void =
   fatal "ptk: " & msg
   quit(QuitFailure)
 
-proc flexFormat(i: TimeInterval): string =
+proc flexFormat(i: Duration): string =
   ## Pretty-format a time interval.
 
   let fmt =
-    if i > 1.days: "d'd' H'h' m'm'"
-    elif i >= 1.hours: "H'h' m'm'"
-    elif i >= 1.minutes: "m'm' s's'"
+    if i > initDuration(days = 1): "d'd' H'h' m'm'"
+    elif i >= initDuration(hours = 1): "H'h' m'm'"
+    elif i >= initDuration(minutes = 1): "m'm' s's'"
     else: "s's'"
 
   return i.format(fmt)
 
-type WriteData = tuple[idx: int, mark: Mark, prefixLen: int, interval: TimeInterval]
+type WriteData = tuple[idx: int, mark: Mark, prefixLen: int, interval: Duration]
 
 proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): void =
   ## Write a nicely-formatted list of Marks to stdout.
@@ -46,9 +48,9 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
 
   let largestInterval = now - marks[idxs.first].time
   let timeFormat =
-    if largestInterval > 1.years: "yyyy-MM-dd HH:mm"
-    elif largestInterval > 7.days: "MMM dd HH:mm"
-    elif largestInterval > 1.days: "ddd HH:mm"
+    if largestInterval > initDuration(days = 365): "yyyy-MM-dd HH:mm"
+    elif largestInterval > initDuration(days = 7): "MMM dd HH:mm"
+    elif largestInterval > initDuration(days = 1): "ddd HH:mm"
     else: "HH:mm"
 
   var toWrite: seq[WriteData] = @[]
@@ -57,7 +59,7 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
 
   for i in idxs:
     let
-      interval: TimeInterval =
+      interval: Duration =
         if (i == marks.len - 1): now - marks[i].time
         else: marks[i + 1].time - marks[i].time
       prefix =
@@ -533,7 +535,7 @@ Options:
 
     if args["sum-time"]:
 
-      var intervals: seq[TimeInterval] = @[]
+      var intervals: seq[Duration] = @[]
 
       if args["--ids"]:
         for id in args["<ids>"]:
