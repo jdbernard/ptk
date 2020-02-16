@@ -1,7 +1,6 @@
 # Package
-include "private/version.nim"
 
-version       = PTK_VERSION
+version       = "1.0.2"
 author        = "Jonathan Bernard"
 description   = "Personal Time Keeper"
 license       = "MIT"
@@ -19,5 +18,9 @@ requires @[
   "jester 0.4.1",
   "https://git.jdb-labs.com/jdb/nim-lang-utils.git",
   "https://git.jdb-labs.com/jdb/nim-cli-utils.git",
-  "https://git.jdb-labs.com/jdb/nim-time-utils.git >= 0.5.2"
+  "https://git.jdb-labs.com/jdb/nim-time-utils.git >= 0.5.2",
+  "https://git.jdb-labs.com/jdb/update-nim-package-version"
 ]
+
+task updateVersion, "Update the version of this package.":
+  exec "update_nim_package_version ptk 'private/version.nim'"
