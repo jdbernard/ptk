@@ -123,9 +123,11 @@ proc doInit(timelineLocation: string): void =
 
 type ExpectedMarkPart = enum Time, Summary, Tags, Notes
 
-proc edit(mark: var Mark): void =
+proc edit(mark: Mark): Mark =
   ## Interactively edit a mark using the editor named in the environment
   ## variable "EDITOR"
+
+  result = mark
 
   var
     tempFile: File
@@ -142,6 +144,7 @@ proc edit(mark: var Mark): void =
     tempFile.writeLine(
       """# Everything from the line below to the end of the file will be considered
 # notes for this timeline mark.""")
+    tempFile.write(mark.notes)
 
     close(tempFile)
     tempFile = nil
@@ -152,12 +155,13 @@ proc edit(mark: var Mark): void =
 
     for line in lines tempFileName:
       if strip(line)[0] == '#': continue
-      elif markPart == Time: mark.time = parseTime(line); markPart = Summary
-      elif markPart == Summary: mark.summary = line; markPart = Tags
+      elif markPart == Time: result.time = parseTime(line); markPart = Summary
+      elif markPart == Summary: result.summary = line; markPart = Tags
       elif markPart == Tags:
-        mark.tags = line.split({',', ';'});
+        result.tags = line.split({',', ';'});
+        result.notes = ""
         markPart = Notes
-      else: mark.notes &= line & "\x0D\x0A"
+      else: result.notes &= line & "\x0D\x0A"
 
   finally: close(tempFile)
 
@@ -425,7 +429,7 @@ Options:
         notes: args["--notes"] ?: "",
         tags: (args["--tags"] ?: "").split({',', ';'}).filterIt(not it.isNilOrWhitespace))
 
-      if args["--edit"]: edit(newMark)
+      if args["--edit"]: newMark = edit(newMark)
 
       let prevLastIdx = timeline.marks.getLastIndex()
       timeline.marks.add(newMark)
@@ -455,7 +459,7 @@ Options:
         notes: markToResume.notes,
         tags: markToResume.tags)
 
-      if args["--edit"]: edit(newMark)
+      if args["--edit"]: newMark = edit(newMark)
 
       timeline.marks.add(newMark)
       timeline.writeMarks(
@@ -492,7 +496,7 @@ Options:
         except: raise newException(ValueError,
           "invalid value for --time: " & getCurrentExceptionMsg())
 
-      if args["--edit"]: edit(mark)
+      if args["--edit"]: mark = edit(mark)
 
       timeline.marks.delete(markIdx)
       timeline.marks.insert(mark, markIdx)
