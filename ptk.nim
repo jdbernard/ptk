@@ -144,6 +144,7 @@ proc edit(mark: var Mark): void =
 # notes for this timeline mark.""")
 
     close(tempFile)
+    tempFile = nil
 
     discard os.execShellCmd "$EDITOR " & tempFileName & " </dev/tty >/dev/tty"
 
