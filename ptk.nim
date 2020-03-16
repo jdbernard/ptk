@@ -152,17 +152,18 @@ proc edit(mark: Mark): Mark =
     discard os.execShellCmd "$EDITOR " & tempFileName & " </dev/tty >/dev/tty"
 
     var markPart = Time
+    var notes: seq[string] = @[]
 
     for line in lines tempFileName:
-      if strip(line)[0] == '#': continue
+      if strip(line).len > 0 and strip(line)[0] == '#': continue
       elif markPart == Time: result.time = parseTime(line); markPart = Summary
       elif markPart == Summary: result.summary = line; markPart = Tags
       elif markPart == Tags:
         result.tags = line.split({',', ';'});
-        result.notes = ""
         markPart = Notes
-      else: result.notes &= line & "\x0D\x0A"
+      else: notes.add(line)
 
+    result.notes = notes.join("\n")
   finally: close(tempFile)
 
 proc filterMarkIndices(timeline: Timeline, args: Table[string, Value]): seq[int] =
