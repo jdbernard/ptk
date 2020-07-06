@@ -3,8 +3,8 @@
 ##
 ## Simple time keeping CLI
 
-import algorithm, docopt, json, langutils, logging, os, nre, sequtils,
-  sets, strutils, tempfile, terminal, times, uuids
+import algorithm, docopt, json, langutils, logging, os, nre, std/wordwrap,
+  sequtils, sets, strutils, tempfile, terminal, times, uuids
 
 import timeutils except `-`;
 
@@ -98,7 +98,7 @@ proc writeMarks(timeline: Timeline, indices: seq[int], includeNotes = false): vo
 
     if includeNotes and len(w.mark.notes.strip) > 0:
       writeLine(stdout, "")
-      let wrappedNotes = wordWrap(s = w.mark.notes,
+      let wrappedNotes = wrapWords(s = w.mark.notes,
                                   maxLineWidth = colWidth)
       for line in splitLines(wrappedNotes):
         writeLine(stdout, spaces(notesPrefixLen) & line)

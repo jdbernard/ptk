@@ -1,1 +1,1 @@
-const PTK_VERSION* = "1.0.5"
+const PTK_VERSION* = "1.0.6"
